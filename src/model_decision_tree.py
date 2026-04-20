@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 
 # CONFIGURATION
@@ -26,6 +26,7 @@ FEATURE_COLS = [f"feature_{i}" for i in range(1, 29)]
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 DEFAULT_MAX_DEPTH = 10
+DEFAULT_CV_FOLDS = 3
 
 
 def load_data(path: Path, sample: int | None) -> pd.DataFrame:
@@ -39,7 +40,7 @@ def load_data(path: Path, sample: int | None) -> pd.DataFrame:
     return df
 
 
-def main(data_path: Path, sample: int | None, max_depth: int) -> None:
+def main(data_path: Path, sample: int | None, max_depth: int, cv_folds: int) -> None:
     df = load_data(data_path, sample)
 
     feature_cols = [c for c in FEATURE_COLS if c in df.columns]
@@ -50,12 +51,30 @@ def main(data_path: Path, sample: int | None, max_depth: int) -> None:
         X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
     )
 
-    model = DecisionTreeClassifier(max_depth=max_depth, random_state=RANDOM_STATE)
+    model = DecisionTreeClassifier(random_state=RANDOM_STATE)
 
-    print(f"Training Decision Tree (max_depth={max_depth}) ...")
-    model.fit(X_train, y_train)
+    max_depth_options = list(dict.fromkeys([max_depth, 6, 10, 15, 20, None]))
+    param_grid = {
+        "max_depth": max_depth_options,
+        "min_samples_split": [2, 10, 50],
+        "min_samples_leaf": [1, 5, 20],
+    }
+    cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_STATE)
+    search = GridSearchCV(
+        estimator=model,
+        param_grid=param_grid,
+        scoring="accuracy",
+        cv=cv,
+        n_jobs=-1,
+        refit=True,
+    )
 
-    y_pred = model.predict(X_test)
+    print(f"Tuning Decision Tree with {cv_folds}-fold cross-validation ...")
+    search.fit(X_train, y_train)
+    print(f"Best params: {search.best_params_}")
+    print(f"Best CV accuracy: {search.best_score_:.4f}")
+
+    y_pred = search.best_estimator_.predict(X_test)
     print(f"\nAccuracy: {accuracy_score(y_test, y_pred):.4f}")
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
@@ -67,6 +86,8 @@ if __name__ == "__main__":
     parser.add_argument("--sample", type=int, default=None,
                         help="Random row sample size (useful for large files)")
     parser.add_argument("--max_depth", type=int, default=DEFAULT_MAX_DEPTH,
-                        help="Maximum tree depth (default: 10)")
+                        help="Baseline max_depth included in tuning grid")
+    parser.add_argument("--cv_folds", type=int, default=DEFAULT_CV_FOLDS,
+                        help="Number of cross-validation folds (default: 3)")
     args = parser.parse_args()
-    main(args.data, args.sample, args.max_depth)
+    main(args.data, args.sample, args.max_depth, args.cv_folds)

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 
 # CONFIGURATION
@@ -30,6 +30,7 @@ RANDOM_STATE = 42
 DEFAULT_N_ESTIMATORS = 200
 DEFAULT_MAX_DEPTH = 6
 DEFAULT_LEARNING_RATE = 0.1
+DEFAULT_CV_FOLDS = 3
 
 
 def load_data(path: Path, sample: int | None) -> pd.DataFrame:
@@ -44,7 +45,7 @@ def load_data(path: Path, sample: int | None) -> pd.DataFrame:
 
 
 def main(data_path: Path, sample: int | None, n_estimators: int,
-         max_depth: int, learning_rate: float, device: str) -> None:
+         max_depth: int, learning_rate: float, device: str, cv_folds: int) -> None:
     df = load_data(data_path, sample)
 
     feature_cols = [c for c in FEATURE_COLS if c in df.columns]
@@ -56,9 +57,6 @@ def main(data_path: Path, sample: int | None, n_estimators: int,
     )
 
     model = XGBClassifier(
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        learning_rate=learning_rate,
         tree_method="hist",         # fast histogram method — scales to large data
         device=device,
         n_jobs=-1,
@@ -66,11 +64,28 @@ def main(data_path: Path, sample: int | None, n_estimators: int,
         eval_metric="logloss",
     )
 
-    print(f"Training XGBoost (n_estimators={n_estimators}, max_depth={max_depth}, "
-          f"lr={learning_rate}, device={device}) ...")
-    model.fit(X_train, y_train)
+    param_grid = {
+        "n_estimators": sorted(set([n_estimators, 150, 250])),
+        "max_depth": sorted(set([max_depth, 4, 6, 8])),
+        "learning_rate": sorted(set([learning_rate, 0.05, 0.1])),
+        "subsample": [0.8, 1.0],
+    }
+    cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_STATE)
+    search = GridSearchCV(
+        estimator=model,
+        param_grid=param_grid,
+        scoring="accuracy",
+        cv=cv,
+        n_jobs=1,
+        refit=True,
+    )
 
-    y_pred = model.predict(X_test)
+    print(f"Tuning XGBoost with {cv_folds}-fold cross-validation (device={device}) ...")
+    search.fit(X_train, y_train)
+    print(f"Best params: {search.best_params_}")
+    print(f"Best CV accuracy: {search.best_score_:.4f}")
+
+    y_pred = search.best_estimator_.predict(X_test)
     print(f"\nAccuracy: {accuracy_score(y_test, y_pred):.4f}")
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
@@ -82,14 +97,16 @@ if __name__ == "__main__":
     parser.add_argument("--sample", type=int, default=None,
                         help="Random row sample size (useful for large files)")
     parser.add_argument("--n_estimators", type=int, default=DEFAULT_N_ESTIMATORS,
-                        help="Number of boosting rounds (default: 200)")
+                        help="Baseline n_estimators included in tuning grid")
     parser.add_argument("--max_depth", type=int, default=DEFAULT_MAX_DEPTH,
-                        help="Maximum tree depth (default: 6)")
+                        help="Baseline max_depth included in tuning grid")
     parser.add_argument("--learning_rate", type=float, default=DEFAULT_LEARNING_RATE,
-                        help="Learning rate / eta (default: 0.1)")
+                        help="Baseline learning rate included in tuning grid")
     parser.add_argument("--device", type=str, default="cpu",
                         choices=["cpu", "cuda"],
                         help="Device to use for training (default: cpu)")
+    parser.add_argument("--cv_folds", type=int, default=DEFAULT_CV_FOLDS,
+                        help="Number of cross-validation folds (default: 3)")
     args = parser.parse_args()
     main(args.data, args.sample, args.n_estimators, args.max_depth,
-         args.learning_rate, args.device)
+         args.learning_rate, args.device, args.cv_folds)

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.pipeline import Pipeline
@@ -29,6 +29,7 @@ FEATURE_COLS = [f"feature_{i}" for i in range(1, 29)]
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
 DEFAULT_K = 5
+DEFAULT_CV_FOLDS = 3
 
 
 def load_data(path: Path, sample: int | None) -> pd.DataFrame:
@@ -42,7 +43,7 @@ def load_data(path: Path, sample: int | None) -> pd.DataFrame:
     return df
 
 
-def main(data_path: Path, sample: int | None, k: int) -> None:
+def main(data_path: Path, sample: int | None, k: int, cv_folds: int) -> None:
     df = load_data(data_path, sample)
 
     feature_cols = [c for c in FEATURE_COLS if c in df.columns]
@@ -55,13 +56,30 @@ def main(data_path: Path, sample: int | None, k: int) -> None:
 
     pipeline = Pipeline([
         ("scaler", StandardScaler()),
-        ("model", KNeighborsClassifier(n_neighbors=k, n_jobs=-1)),
+        ("model", KNeighborsClassifier(n_jobs=-1)),
     ])
 
-    print(f"Training k-NN (k={k}) ...")
-    pipeline.fit(X_train, y_train)
+    param_grid = {
+        "model__n_neighbors": sorted(set([k, 3, 5, 7, 11, 15])),
+        "model__weights": ["uniform", "distance"],
+        "model__p": [1, 2],
+    }
+    cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=RANDOM_STATE)
+    search = GridSearchCV(
+        estimator=pipeline,
+        param_grid=param_grid,
+        scoring="accuracy",
+        cv=cv,
+        n_jobs=-1,
+        refit=True,
+    )
 
-    y_pred = pipeline.predict(X_test)
+    print(f"Tuning k-NN with {cv_folds}-fold cross-validation ...")
+    search.fit(X_train, y_train)
+    print(f"Best params: {search.best_params_}")
+    print(f"Best CV accuracy: {search.best_score_:.4f}")
+
+    y_pred = search.best_estimator_.predict(X_test)
     print(f"\nAccuracy: {accuracy_score(y_test, y_pred):.4f}")
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred))
@@ -73,6 +91,8 @@ if __name__ == "__main__":
     parser.add_argument("--sample", type=int, default=None,
                         help="Random row sample size (recommended for large files)")
     parser.add_argument("--k", type=int, default=DEFAULT_K,
-                        help="Number of neighbors (default: 5)")
+                        help="Baseline number of neighbors included in tuning grid")
+    parser.add_argument("--cv_folds", type=int, default=DEFAULT_CV_FOLDS,
+                        help="Number of cross-validation folds (default: 3)")
     args = parser.parse_args()
-    main(args.data, args.sample, args.k)
+    main(args.data, args.sample, args.k, args.cv_folds)
