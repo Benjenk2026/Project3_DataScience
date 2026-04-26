@@ -11,24 +11,31 @@ Data Science project using supervised learning on the UCI HIGGS dataset.
 * [Go to Decision Tree](#decision-tree----model_decision_treepy)
 * [Go to Random Forest](#random-forest----model_random_forestpy)
 * [Go to Gradient Boosting (XGBoost)](#gradient-boosting-xgboost----model_xgboostpy)
+* [Go to PCA Comparison Analysis](#pca-comparison-analysis----pca_comparisonpy)
+* [Go to Cluster Label Integration Analysis](#cluster-label-integration-analysis----cluster_label_integrationpy)
 
 ---
 
 ## Project Structure
 
 ```
+Analysis_and_Findings/  # Results from analysis scripts
+  cluster_integration/  # Output from cluster_label_integration.py
+  pca_comparison/       # Output from pca_comparison.py
 data/
   higgs/          # Raw HIGGS.csv (download separately)
   processed/      # Cleaned output from cleaning.py
 src/
-  cleaning.py             # Data cleaning pipeline
-  eda.py                  # Exploratory data analysis
-  model_linear_svm.py     # Linear SVM
-  model_rbf_svm.py        # RBF-Kernel SVM
-  model_knn.py            # k-Nearest Neighbors
-  model_decision_tree.py  # Decision Tree
-  model_random_forest.py  # Random Forest
-  model_xgboost.py        # Gradient Boosting (XGBoost)
+  cleaning.py               # Data cleaning pipeline
+  eda.py                    # Exploratory data analysis
+  pca_comparison.py         # PCA vs Raw Features analysis
+  cluster_label_integration.py  # Cluster membership feature analysis
+  model_linear_svm.py       # Linear SVM
+  model_rbf_svm.py          # RBF-Kernel SVM
+  model_knn.py              # k-Nearest Neighbors
+  model_decision_tree.py    # Decision Tree
+  model_random_forest.py    # Random Forest
+  model_xgboost.py          # Gradient Boosting (XGBoost)
 ```
 
 ---
@@ -341,11 +348,238 @@ Benchmark results are saved to `processed/benchmark_results.csv`.
 4. Best performance-to-scalability tradeoff: `XGBoost`
 
 
+---
 
-## For Report 
+## PCA Comparison Analysis — `pca_comparison.py`
 
-Based on the benchmark results in benchmark_results.csv, the model that scales best overall is XGBoost. It ran successfully at 50k, 200k, 500k, and 1M, and its training time stayed relatively low: 0.57s, 1.25s, 2.97s, and 5.73s. Linear SVM and Decision Tree also scale reasonably well in terms of runtime, but they do not match XGBoost’s predictive quality. Random Forest scales to 1M too, but its cost grows much faster, reaching 62.23s at 1M. k-NN and RBF SVM do not scale well in this benchmark: k-NN was skipped beyond 200k, and RBF SVM was skipped beyond 10k because of computational limits.
+Analyzes the impact of dimensionality reduction on model performance by comparing classifiers trained on raw 28-dimensional features versus PCA-reduced features (10 principal components).
 
-The best-performing model is also XGBoost. It had the strongest results at every benchmark size across all four metrics. At 1M rows, it achieved Accuracy 0.7379, F1 0.7377, ROC-AUC 0.8186, and PR-AUC 0.8333. Random Forest was consistently second best, with strong but slightly lower numbers at every size. Decision Tree improved as sample size increased and was clearly better than Linear SVM and k-NN, but it stayed behind the two ensemble tree models. Linear SVM and k-NN were the weakest among the models that ran across larger samples. RBF SVM also underperformed in its 10k quality-demo run, so there is no evidence here that it would beat the other models even if it were computationally feasible.
+### Purpose
 
-For interpretability, Decision Tree is the most interpretable model. You can inspect its splits directly and explain predictions in terms of feature thresholds. Linear SVM is next most interpretable because its linear weights can be examined, although that is less intuitive than a tree. Random Forest is moderately interpretable through feature importance and per-tree inspection, but the full ensemble is harder to explain. XGBoost is less interpretable than a single tree or linear model because it combines many boosted trees, even though feature importance and SHAP-style explanations can help. k-NN is easy to describe procedurally, but not very interpretable as a global model. RBF SVM is the least interpretable because its nonlinear kernel decision boundary is difficult to explain directly.
+Evaluate whether PCA dimensionality reduction:
+- Speeds up training and inference across all classifiers
+- Preserves or improves classification performance
+- Provides meaningful insights into feature redundancy
+
+### Usage
+
+```bash
+python src/pca_comparison.py
+python src/pca_comparison.py --rows 500000
+python src/pca_comparison.py --rows 200000 
+```
+
+| Argument | Description | Default |
+|---|---|---|
+| `--rows N` | Number of rows to sample for analysis | full dataset |
+| `--components N` | Number of PCA components | `10` |
+
+### What It Does
+
+1. Loads cleaned HIGGS data
+2. Applies PCA to reduce 28 features to 10 principal components
+3. Trains all six classifiers on both raw and PCA-reduced feature sets using fixed benchmark hyperparameters
+4. Records for each model:
+   - Accuracy, ROC-AUC, PR-AUC, F1-score on both feature sets
+   - Training time
+   - Inference time
+5. Generates comparison visualizations and results CSV
+
+### Output
+
+Results are saved to `Analysis_and_Findings/pca_comparison/pca_vs_raw_results.csv` with metrics for each model and feature configuration.
+
+---
+
+## Cluster Label Integration Analysis — `cluster_label_integration.py`
+
+Evaluates whether k-Means cluster membership (from Project 2) acts as a useful supplementary feature for improving classification performance.
+
+### Purpose
+
+Test if adding cluster IDs as an additional feature helps classifiers by:
+- Capturing high-level data groupings missed by individual features
+- Providing non-linear feature engineering through unsupervised clustering
+- Improving model generalization across cluster boundaries
+
+### Usage
+
+```bash
+python src/cluster_label_integration.py
+python src/cluster_label_integration.py --rows 200000
+python src/cluster_label_integration.py --rows 500000
+```
+
+To run the full benchmark set and preserve each output with a size suffix, use:
+
+```bash
+python src/run_cluster_integration_batch.py
+python src/run_cluster_integration_batch.py --data processed/higgs_clustered.csv
+python src/run_cluster_integration_batch.py --sizes 50000 200000 500000 1000000
+```
+
+| Argument | Description | Default |
+|---|---|---|
+| `--rows N` | Number of rows to sample for analysis | full dataset |
+
+### What It Does
+
+1. Loads clustered HIGGS data (with pre-computed cluster assignments from Project 2)
+2. Trains all six classifiers on:
+   - Raw features only (baseline)
+   - Raw features + cluster ID as an additional feature
+  - Uses fixed benchmark hyperparameters rather than per-run CV tuning
+3. Records for each model:
+   - Accuracy, ROC-AUC, PR-AUC, F1-score for both configurations
+   - Improvement delta between cluster-augmented and baseline
+4. Generates comparison visualizations and results CSV
+
+### Output
+
+Results are saved to `Analysis_and_Findings/cluster_integration/cluster_integration_results.csv` with metrics comparing models with and without cluster membership as a feature.
+
+The batch helper additionally writes size-tagged files such as `cluster_integration_results_50.csv` and `cluster_integration_comparison_50.png`.
+
+
+## K-Means Clustering Pipeline (k-means.py)
+
+The script `src/k-means.py` runs clustering on the cleaned HIGGS dataset using all 28 feature columns (`feature_1` to `feature_28`).
+
+### Main goals
+- Cluster events using the full 28-dimensional feature space.
+- Support both `KMeans` and `MiniBatchKMeans`.
+- Allow limiting the number of rows used for faster experiments.
+- Benchmark runtime vs dataset size and save a plot.
+
+### Default behavior
+Running with no arguments:
+
+`python src/k-means.py`
+
+will:
+- Read `data/processed/higgs_cleaned.csv`
+- Validate required feature columns
+- Convert features to numeric and drop invalid rows
+- Standardize all 28 features
+- Fit K-Means (`k=2` by default)
+- Save output with cluster labels to `data/processed/higgs_clustered.csv`
+
+### Useful options
+- `--k`: number of clusters (default `2`)
+- `--algorithm`: `kmeans` or `minibatch` (default `kmeans`)
+- `--batch-size`: mini-batch size when using `minibatch` (default `10000`)
+- `--rows`: limit the number of rows loaded from input
+- `--input`: input CSV path (default `data/processed/ higgs_cleaned.csv`)
+- `--output`: output CSV path (default `data/processed/higgs_clustered.csv`)
+- `--random-state`: random seed (default `42`)
+
+### Example: MiniBatch on a subset
+
+`python src/k-means.py --algorithm minibatch --rows 500000 --k 2`
+
+
+## Step-by-Step Run Order
+
+Use this order if you want to reproduce the project from raw data to final comparisons.
+
+### 1. Install dependencies
+
+From the project root:
+
+```bash
+pip install pandas scikit-learn xgboost matplotlib seaborn
+```
+
+### 2. Put the raw HIGGS file in place
+
+Download the UCI HIGGS dataset and place the raw file where `cleaning.py` expects it.
+
+Expected path:
+
+```text
+data/higgs/HIGGS.csv
+```
+
+### 3. Clean the raw dataset
+
+Run the cleaning pipeline before any modeling or analysis script.
+
+```bash
+cd src
+python cleaning.py --file higgs --chunked
+```
+
+This creates `data/processed/higgs_cleaned.csv`.
+
+### 4. Optionally inspect the cleaned data
+
+If you want a quick exploratory pass before training models:
+
+```bash
+python eda.py
+```
+
+### 5. Run the individual supervised models
+
+These scripts perform train/test split, CV tuning, and final held-out evaluation.
+
+```bash
+python model_linear_svm.py --data ../data/processed/higgs_cleaned.csv --sample 500000 --cv_folds 3
+python model_rbf_svm.py --data ../data/processed/higgs_cleaned.csv --sample 50000 --cv_folds 3
+python model_knn.py --data ../data/processed/higgs_cleaned.csv --sample 100000 --k 5 --cv_folds 3
+python model_decision_tree.py --data ../data/processed/higgs_cleaned.csv --max_depth 10 --cv_folds 3
+python model_random_forest.py --data ../data/processed/higgs_cleaned.csv --n_estimators 200 --max_depth 15 --cv_folds 3
+python model_xgboost.py --data ../data/processed/higgs_cleaned.csv --n_estimators 300 --learning_rate 0.05 --cv_folds 3
+```
+
+Use smaller `--sample` values while testing, then larger values for final runs.
+
+### 6. Run the all-model benchmark
+
+This compares the main classifiers at 50k, 200k, 500k, and 1M rows using fixed hyperparameters.
+
+```bash
+python benchmark_metrics.py --data ../data/processed/higgs_cleaned.csv
+```
+
+This writes benchmark results to `processed/benchmark_results.csv`.
+
+### 7. Run the PCA comparison analysis
+
+After cleaning is complete, compare raw 28D features against PCA-reduced features.
+
+```bash
+python src/pca_comparison.py --rows 500000 --components 10 
+```
+
+Use this after the core model runs if you want dimensionality-reduction analysis.
+
+### 8. Run the cluster label integration analysis
+
+This depends on a clustered dataset from Project 2 named `higgs_clustered.csv`.
+ 
+If you do not already have `higgs_clustered.csv`, run the k-means.py to get that dataset.
+
+Once you have that file in `processed/`, you can run the command :
+
+```bash
+python cluster_label_integration.py --rows 200000
+```
+
+### 9. Review outputs in the results folders
+
+After the runs finish, review:
+
+1. `processed/benchmark_results.csv`
+2. `Analysis_and_Findings/pca_comparison/`
+3. `Analysis_and_Findings/cluster_integration/`
+
+### Recommended practical order
+
+If you want the shortest sensible workflow, use this sequence:
+
+1. `cleaning.py`
+2. One or more individual model scripts
+3. `benchmark_metrics.py`
+4. `pca_comparison.py`
+5. `run_cluster_integration_batch.py` after you have `higgs_clustered.csv` from Project 2
